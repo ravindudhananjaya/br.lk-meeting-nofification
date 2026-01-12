@@ -9,6 +9,11 @@ app.use(express.json());
 const TEXTLK_API_TOKEN = process.env.TEXTLK_API_TOKEN || 'YOUR_TEXTLK_API_TOKEN_HERE';
 const SENDER_ID = process.env.SENDER_ID || 'TextLKDemo';
 
+// --- HEALTH CHECK ENDPOINT ---
+app.get('/', (req, res) => {
+    res.status(200).send('Webhook server is running. Send POST requests to /webhooks/cal');
+});
+
 // --- MAIN WEBHOOK ENDPOINT ---
 app.post('/webhooks/cal', async (req, res) => {
     const { triggerEvent, payload } = req.body;
@@ -16,11 +21,16 @@ app.post('/webhooks/cal', async (req, res) => {
     // Booking එකක් සිදු වූ විට පමණක් ක්‍රියාත්මක වේ
     if (triggerEvent === 'BOOKING_CREATED') {
         try {
+            if (!payload.attendees || payload.attendees.length === 0) {
+                console.log('No attendees found in payload');
+                return res.status(200).send('No attendees found');
+            }
+
             const startTime = new Date(payload.startTime);
             const attendeeName = payload.attendees[0].name;
-            
+
             // 1. Phone number එක ලබා ගැනීම (Cal.com එකෙන් එවන විදි කිහිපයක් තිබිය හැක)
-            let rawPhone = payload.attendees[0].phoneNumber || payload.responses.phone || "";
+            let rawPhone = payload.attendees[0].phoneNumber || payload.responses?.phone || "";
 
             // 2. Cleanup: ඉලක්කම් නොවන සියල්ල ඉවත් කරන්න (+, spaces, etc.)
             let cleanPhone = rawPhone.replace(/\D/g, '');
@@ -40,7 +50,7 @@ app.post('/webhooks/cal', async (req, res) => {
 
             // --- SMS 1: Immediate Confirmation ---
             await sendSMS(
-                cleanPhone, 
+                cleanPhone,
                 `Hi ${attendeeName}, your booking is confirmed for ${startTime.toLocaleString('en-GB')}.`
             );
 
@@ -49,8 +59,8 @@ app.post('/webhooks/cal', async (req, res) => {
             // දැන් වෙලාවට වඩා අනාගත වෙලාවක් නම් පමණක් schedule කරන්න
             if (oneHourBefore > new Date()) {
                 await sendSMS(
-                    cleanPhone, 
-                    `Reminder: Your meeting starts in 1 hour.`, 
+                    cleanPhone,
+                    `Reminder: Your meeting starts in 1 hour.`,
                     formatDateForTextLK(oneHourBefore)
                 );
             }
@@ -59,8 +69,8 @@ app.post('/webhooks/cal', async (req, res) => {
             const tenMinsBefore = new Date(startTime.getTime() - (10 * 60 * 1000));
             if (tenMinsBefore > new Date()) {
                 await sendSMS(
-                    cleanPhone, 
-                    `Quick reminder: Your meeting starts in 10 minutes!`, 
+                    cleanPhone,
+                    `Quick reminder: Your meeting starts in 10 minutes!`,
                     formatDateForTextLK(tenMinsBefore)
                 );
             }
