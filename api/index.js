@@ -98,28 +98,29 @@ app.post('/webhooks/cal', async (req, res) => {
 async function sendSMS(phone, message, scheduleTime = null) {
     const url = 'https://app.text.lk/api/v3/sms/send';
 
-    // The API documentation example uses JSON with a Bearer token. 
-    // Let's stick to JSON as it's cleaner for 'schedule_time'.
-    const data = {
+    // Construct the payload exactly as the doc suggests
+    const payload = {
         recipient: phone,
         sender_id: SENDER_ID,
         type: 'plain',
         message: message
     };
 
+    // Only add schedule_time if it's actually in the future
     if (scheduleTime) {
-        data.schedule_time = scheduleTime; // Expected format: "2025-12-20 07:00"
+        payload.schedule_time = scheduleTime;
     }
 
     try {
-        const response = await axios.post(url, data, {
+        const response = await axios.post(url, payload, {
             headers: {
                 'Authorization': `Bearer ${TEXTLK_API_TOKEN}`,
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json', // Switch to JSON
                 'Accept': 'application/json'
             }
         });
-        console.log(`[TextLK] Success for ${phone}. Scheduled: ${scheduleTime || 'Now'}`);
+
+        console.log(`[TextLK] Sent to ${phone}. Schedule string used: "${scheduleTime || 'NOW'}"`);
         return response;
     } catch (error) {
         console.error('[TextLK] Error:', error.response?.data || error.message);
@@ -127,24 +128,21 @@ async function sendSMS(phone, message, scheduleTime = null) {
     }
 }
 
-// Formats time to "YYYY-MM-DD HH:MM" required by Text.lk
-// Formats time to "YYYY-MM-DD HH:MM" required by Text.lk (Sri Lanka Time Zone: UTC+5:30)
 function formatDateForTextLK(date) {
-    const formatter = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Colombo',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    });
+    // Manually constructing to avoid any locale/formatting hidden characters
+    const pad = (num) => num.toString().padStart(2, '0');
 
-    const parts = formatter.formatToParts(date);
-    const get = (t) => parts.find(p => p.type === t).value;
+    // Important: Text.lk needs the time in the timezone of the account (Asia/Colombo)
+    // We convert the UTC date to a Colombo string manually
+    const colomboTime = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
 
-    return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+    const yyyy = colomboTime.getFullYear();
+    const mm = pad(colomboTime.getMonth() + 1);
+    const dd = pad(colomboTime.getDate());
+    const hh = pad(colomboTime.getHours());
+    const min = pad(colomboTime.getMinutes());
+
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
 }
 
 
