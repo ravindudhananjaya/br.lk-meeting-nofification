@@ -48,13 +48,15 @@ app.post('/webhooks/cal', async (req, res) => {
 
             // 5. Meeting Link Extraction
             const meetingLink = payload.metadata?.videoCallUrl || payload.location || "Check email for link";
+            // 6. Reschedule Link Extraction
+            const rescheduleLink = `https://cal.com/reschedule/${payload.uid}`;
 
             console.log(`Scheduling messages for ${cleanPhone} at ${startTime}`);
 
             // --- SMS 1: Immediate Confirmation ---
             await sendSMS(
                 cleanPhone,
-                `Hi ${attendeeName},\nYour appointment is successfully scheduled.Time: ${startTime.toLocaleString('en-GB', { timeZone: 'Asia/Colombo' })}.\n\n Join here: ${meetingLink} \n Thank you for choosing br.lk. See you soon`
+                `Hi ${attendeeName},\nYour appointment is successfully scheduled.Time: ${startTime.toLocaleString('en-GB', { timeZone: 'Asia/Colombo' })}.\n\nJoin here: ${meetingLink}\nNeed to change? Reschedule here: ${rescheduleLink}\nThank you for choosing br.lk. See you soon`
             );
 
             // --- SMS 2: 1 Hour Before Reminder ---
@@ -63,7 +65,7 @@ app.post('/webhooks/cal', async (req, res) => {
             if (oneHourBefore > new Date()) {
                 await sendSMS(
                     cleanPhone,
-                    `Hello ${attendeeName},\nThis is a reminder that your meeting with br.lk starts in 1 hour.\n\nJoin Link: ${meetingLink}\nIf you need to reschedule or cancel,\n please let us know via WhatsApp: https://wa.me/94777895327`,
+                    `Hello ${attendeeName},\nThis is a reminder that your meeting with br.lk starts in 1 hour.\n\nJoin Link: ${meetingLink}\nNeed to reschedule? ${rescheduleLink}\nOr contact us via WhatsApp: https://wa.me/94777895327`,
                     formatDateForTextLK(oneHourBefore)
                 );
             }
@@ -73,7 +75,7 @@ app.post('/webhooks/cal', async (req, res) => {
             if (tenMinsBefore > new Date()) {
                 await sendSMS(
                     cleanPhone,
-                    `Reminder: Your meeting with br.lk starts in 10 mins.\n\nClick to join: ${meetingLink}\nNeed to change or cancel?\nContact us on WhatsApp: https://wa.me/94777895327`,
+                    `Reminder: Your meeting with br.lk starts in 10 mins.\n\nClick to join: ${meetingLink}\nNeed to change? ${rescheduleLink}\nOr WhatsApp: https://wa.me/94777895327`,
                     formatDateForTextLK(tenMinsBefore)
                 );
             }
@@ -95,31 +97,25 @@ app.post('/webhooks/cal', async (req, res) => {
 // Function to send SMS via Text.lk API
 async function sendSMS(phone, message, scheduleTime = null) {
     const url = 'https://app.text.lk/api/v3/sms/send';
-    const data = {
-        recipient: phone,
-        sender_id: SENDER_ID,
-        type: 'plain',
-        message: message
-    };
+    // Use URLSearchParams to send as application/x-www-form-urlencoded
+    // This is often more reliable for older SMS gateways than JSON
+    const params = new URLSearchParams();
+    params.append('recipient', phone);
+    params.append('sender_id', SENDER_ID);
+    params.append('type', 'plain');
+    params.append('message', message);
 
-    // Add scheduleTime only if it exists
     if (scheduleTime) {
-        data.schedule_time = scheduleTime;
+        params.append('schedule_time', scheduleTime);
     }
 
-    console.log('[TextLK] Sending SMS Request:', JSON.stringify(data));
-
-    // Append schedule_time to URL as well just in case
-    let finalUrl = url;
-    if (scheduleTime) {
-        finalUrl += `?schedule_time=${encodeURIComponent(scheduleTime)}`;
-    }
+    console.log('[TextLK] Sending SMS (Form Data):', params.toString());
 
     try {
-        const response = await axios.post(finalUrl, data, {
+        const response = await axios.post(url, params, {
             headers: {
                 'Authorization': `Bearer ${TEXTLK_API_TOKEN}`,
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded',
                 'Accept': 'application/json'
             }
         });
