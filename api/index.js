@@ -46,12 +46,15 @@ app.post('/webhooks/cal', async (req, res) => {
                 return res.status(200).send('International number detected. No SMS sent.');
             }
 
+            // 5. Meeting Link Extraction
+            const meetingLink = payload.metadata?.videoCallUrl || payload.location || "Check email for link";
+
             console.log(`Scheduling messages for ${cleanPhone} at ${startTime}`);
 
             // --- SMS 1: Immediate Confirmation ---
             await sendSMS(
                 cleanPhone,
-                `Hi ${attendeeName}, your booking is confirmed for ${startTime.toLocaleString('en-GB')}.`
+                `Hi ${attendeeName},\n\n your appointment is successfully scheduled.Time: ${startTime.toLocaleString('en-GB', { timeZone: 'Asia/Colombo' })}.\n\n Join here: ${meetingLink} \n\n Thank you for choosing br.lk. See you soon`
             );
 
             // --- SMS 2: 1 Hour Before Reminder ---
@@ -60,7 +63,7 @@ app.post('/webhooks/cal', async (req, res) => {
             if (oneHourBefore > new Date()) {
                 await sendSMS(
                     cleanPhone,
-                    `Reminder: Your meeting starts in 1 hour.`,
+                    `Hello ${attendeeName}, this is a reminder that your meeting with br.lk starts in 1 hour.\n\nJoin Link: ${meetingLink}\n\n If you need to reschedule or cancel,\n\n please let us know via WhatsApp: https://wa.me/94777895327`,
                     formatDateForTextLK(oneHourBefore)
                 );
             }
@@ -70,7 +73,7 @@ app.post('/webhooks/cal', async (req, res) => {
             if (tenMinsBefore > new Date()) {
                 await sendSMS(
                     cleanPhone,
-                    `Quick reminder: Your meeting starts in 10 minutes!`,
+                    `Reminder: Your meeting with br.lk starts in 10 mins.\n\n Click to join: ${meetingLink}\n\n Need to change or cancel? Contact us on WhatsApp: https://wa.me/94777895327`,
                     formatDateForTextLK(tenMinsBefore)
                 );
             }
@@ -114,13 +117,19 @@ async function sendSMS(phone, message, scheduleTime = null) {
 }
 
 // වෙලාව Text.lk වලට අවශ්‍ය "YYYY-MM-DD HH:MM" format එකට සකසයි
+// වෙලාව Text.lk වලට අවශ්‍ය "YYYY-MM-DD HH:MM" format එකට සකසයි (Sri Lanka Time Zone: UTC+5:30)
 function formatDateForTextLK(date) {
+    // 1. UTC වෙලාවට පැය 5.5 (මිනිත්තු 330) එකතු කරන්න
+    const slTime = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+
+    // 2. දැන් slTime එකේ UTC කොටස් ගත්තම හරියටම ලංකාවෙ වෙලාව ලැබෙනවා
     const pad = (num) => num.toString().padStart(2, '0');
-    const yyyy = date.getFullYear();
-    const mm = pad(date.getMonth() + 1);
-    const dd = pad(date.getDate());
-    const hh = pad(date.getHours());
-    const min = pad(date.getMinutes());
+    const yyyy = slTime.getUTCFullYear();
+    const mm = pad(slTime.getUTCMonth() + 1);
+    const dd = pad(slTime.getUTCDate());
+    const hh = pad(slTime.getUTCHours());
+    const min = pad(slTime.getUTCMinutes());
+
     return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
 }
 
