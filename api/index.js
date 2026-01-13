@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 // --- CONFIGURATION ---
-// Vercel Environment Variables වල මේවා set කරන්න, නැත්නම් මෙතනට කෙලින්ම දාන්න
+// Set these in Vercel Environment Variables, or put them directly here
 const TEXTLK_API_TOKEN = process.env.TEXTLK_API_TOKEN || 'YOUR_TEXTLK_API_TOKEN_HERE';
 const SENDER_ID = process.env.SENDER_ID || 'TextLKDemo';
 
@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
 app.post('/webhooks/cal', async (req, res) => {
     const { triggerEvent, payload } = req.body;
 
-    // Booking එකක් සිදු වූ විට පමණක් ක්‍රියාත්මක වේ
+    // Only triggers when a Booking is created
     if (triggerEvent === 'BOOKING_CREATED') {
         try {
             if (!payload.attendees || payload.attendees.length === 0) {
@@ -29,18 +29,18 @@ app.post('/webhooks/cal', async (req, res) => {
             const startTime = new Date(payload.startTime);
             const attendeeName = payload.attendees[0].name;
 
-            // 1. Phone number එක ලබා ගැනීම (Cal.com එකෙන් එවන විදි කිහිපයක් තිබිය හැක)
+            // 1. Get Phone number (Cal.com might send it in different ways)
             let rawPhone = payload.attendees[0].phoneNumber || payload.responses?.phone || "";
 
-            // 2. Cleanup: ඉලක්කම් නොවන සියල්ල ඉවත් කරන්න (+, spaces, etc.)
+            // 2. Cleanup: Remove everything except digits (+, spaces, etc.)
             let cleanPhone = rawPhone.replace(/\D/g, '');
 
-            // 3. Sri Lanka Conversion: 077... ලෙස ඇත්නම් 9477... කරන්න
+            // 3. Sri Lanka Conversion: If it starts with 077..., change to 9477...
             if (cleanPhone.startsWith('0')) {
                 cleanPhone = '94' + cleanPhone.substring(1);
             }
 
-            // 4. Verification: 94 වලින් පටන් ගන්නා අංක පමණක් ඉඩ දෙන්න
+            // 4. Verification: Only allow numbers starting with 94
             if (!cleanPhone.startsWith('94')) {
                 console.log(`Skipping SMS for non-Sri Lankan number: ${cleanPhone}`);
                 return res.status(200).send('International number detected. No SMS sent.');
@@ -59,7 +59,7 @@ app.post('/webhooks/cal', async (req, res) => {
 
             // --- SMS 2: 1 Hour Before Reminder ---
             const oneHourBefore = new Date(startTime.getTime() - (60 * 60 * 1000));
-            // දැන් වෙලාවට වඩා අනාගත වෙලාවක් නම් පමණක් schedule කරන්න
+            // Only schedule if the time is in the future
             if (oneHourBefore > new Date()) {
                 await sendSMS(
                     cleanPhone,
@@ -86,13 +86,13 @@ app.post('/webhooks/cal', async (req, res) => {
         }
     }
 
-    // වෙනත් event එකක් නම් ignore කරන්න
+    // Ignore other events
     res.status(200).send('Webhook received, but not a booking event.');
 });
 
 // --- HELPER FUNCTIONS ---
 
-// Text.lk API එකට SMS යවන function එක
+// Function to send SMS via Text.lk API
 async function sendSMS(phone, message, scheduleTime = null) {
     const url = 'https://app.text.lk/api/v3/sms/send';
     const data = {
@@ -102,26 +102,39 @@ async function sendSMS(phone, message, scheduleTime = null) {
         message: message
     };
 
-    // scheduleTime එකක් තිබේ නම් පමණක් add කරන්න
+    // Add scheduleTime only if it exists
     if (scheduleTime) {
         data.schedule_time = scheduleTime;
     }
 
-    console.log('[TextLK] Sending SMS:', JSON.stringify(data));
+    console.log('[TextLK] Sending SMS Request:', JSON.stringify(data));
 
-    return axios.post(url, data, {
-        headers: {
-            'Authorization': `Bearer ${TEXTLK_API_TOKEN}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-    });
+    // Append schedule_time to URL as well just in case
+    let finalUrl = url;
+    if (scheduleTime) {
+        finalUrl += `?schedule_time=${encodeURIComponent(scheduleTime)}`;
+    }
+
+    try {
+        const response = await axios.post(finalUrl, data, {
+            headers: {
+                'Authorization': `Bearer ${TEXTLK_API_TOKEN}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        });
+        console.log('[TextLK] Response:', response.data);
+        return response;
+    } catch (error) {
+        console.error('[TextLK] Error:', error.response?.data || error.message);
+        throw error;
+    }
 }
 
-// වෙලාව Text.lk වලට අවශ්‍ය "YYYY-MM-DD HH:MM" format එකට සකසයි
-// වෙලාව Text.lk වලට අවශ්‍ය "YYYY-MM-DD HH:MM" format එකට සකසයි (Sri Lanka Time Zone: UTC+5:30)
+// Formats time to "YYYY-MM-DD HH:MM" required by Text.lk
+// Formats time to "YYYY-MM-DD HH:MM" required by Text.lk (Sri Lanka Time Zone: UTC+5:30)
 function formatDateForTextLK(date) {
-    // Intl.DateTimeFormat භාවිතා කර නිවැරදිව TimeZone එකට හරවන්න (Format: YYYY-MM-DD HH:MM)
+    // Use Intl.DateTimeFormat to correctly convert to TimeZone (Format: YYYY-MM-DD HH:MM)
     const formatter = new Intl.DateTimeFormat('en-GB', {
         timeZone: 'Asia/Colombo',
         year: 'numeric',
@@ -144,5 +157,5 @@ function formatDateForTextLK(date) {
     return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
 }
 
-// Vercel deployment සඳහා අවශ්‍ය වේ
+// Required for Vercel deployment
 module.exports = app;
