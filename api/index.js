@@ -54,7 +54,7 @@ app.post('/webhooks/cal', async (req, res) => {
             // --- SMS 1: Immediate Confirmation ---
             await sendSMS(
                 cleanPhone,
-                `Hi ${attendeeName},\n\n your appointment is successfully scheduled.Time: ${startTime.toLocaleString('en-GB', { timeZone: 'Asia/Colombo' })}.\n\n Join here: ${meetingLink} \n\n Thank you for choosing br.lk. See you soon`
+                `Hi ${attendeeName},\nYour appointment is successfully scheduled.Time: ${startTime.toLocaleString('en-GB', { timeZone: 'Asia/Colombo' })}.\n\n Join here: ${meetingLink} \n Thank you for choosing br.lk. See you soon`
             );
 
             // --- SMS 2: 1 Hour Before Reminder ---
@@ -63,7 +63,7 @@ app.post('/webhooks/cal', async (req, res) => {
             if (oneHourBefore > new Date()) {
                 await sendSMS(
                     cleanPhone,
-                    `Hello ${attendeeName}, this is a reminder that your meeting with br.lk starts in 1 hour.\n\nJoin Link: ${meetingLink}\n\n If you need to reschedule or cancel,\n\n please let us know via WhatsApp: https://wa.me/94777895327`,
+                    `Hello ${attendeeName},\nThis is a reminder that your meeting with br.lk starts in 1 hour.\n\nJoin Link: ${meetingLink}\nIf you need to reschedule or cancel,\n please let us know via WhatsApp: https://wa.me/94777895327`,
                     formatDateForTextLK(oneHourBefore)
                 );
             }
@@ -73,7 +73,7 @@ app.post('/webhooks/cal', async (req, res) => {
             if (tenMinsBefore > new Date()) {
                 await sendSMS(
                     cleanPhone,
-                    `Reminder: Your meeting with br.lk starts in 10 mins.\n\n Click to join: ${meetingLink}\n\n Need to change or cancel? Contact us on WhatsApp: https://wa.me/94777895327`,
+                    `Reminder: Your meeting with br.lk starts in 10 mins.\n\nClick to join: ${meetingLink}\nNeed to change or cancel?\nContact us on WhatsApp: https://wa.me/94777895327`,
                     formatDateForTextLK(tenMinsBefore)
                 );
             }
