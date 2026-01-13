@@ -97,29 +97,29 @@ app.post('/webhooks/cal', async (req, res) => {
 // Function to send SMS via Text.lk API
 async function sendSMS(phone, message, scheduleTime = null) {
     const url = 'https://app.text.lk/api/v3/sms/send';
-    // Use URLSearchParams to send as application/x-www-form-urlencoded
-    // This is often more reliable for older SMS gateways than JSON
-    const params = new URLSearchParams();
-    params.append('recipient', phone);
-    params.append('sender_id', SENDER_ID);
-    params.append('type', 'plain');
-    params.append('message', message);
+
+    // The API documentation example uses JSON with a Bearer token. 
+    // Let's stick to JSON as it's cleaner for 'schedule_time'.
+    const data = {
+        recipient: phone,
+        sender_id: SENDER_ID,
+        type: 'plain',
+        message: message
+    };
 
     if (scheduleTime) {
-        params.append('schedule_time', scheduleTime);
+        data.schedule_time = scheduleTime; // Expected format: "2025-12-20 07:00"
     }
 
-    console.log('[TextLK] Sending SMS (Form Data):', params.toString());
-
     try {
-        const response = await axios.post(url, params, {
+        const response = await axios.post(url, data, {
             headers: {
                 'Authorization': `Bearer ${TEXTLK_API_TOKEN}`,
-                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Type': 'application/json',
                 'Accept': 'application/json'
             }
         });
-        console.log('[TextLK] Response:', response.data);
+        console.log(`[TextLK] Success for ${phone}. Scheduled: ${scheduleTime || 'Now'}`);
         return response;
     } catch (error) {
         console.error('[TextLK] Error:', error.response?.data || error.message);
