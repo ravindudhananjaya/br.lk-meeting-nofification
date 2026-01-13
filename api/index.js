@@ -107,6 +107,8 @@ async function sendSMS(phone, message, scheduleTime = null) {
         data.schedule_time = scheduleTime;
     }
 
+    console.log('[TextLK] Sending SMS:', JSON.stringify(data));
+
     return axios.post(url, data, {
         headers: {
             'Authorization': `Bearer ${TEXTLK_API_TOKEN}`,
@@ -130,7 +132,7 @@ function formatDateForTextLK(date) {
     const hh = pad(slTime.getUTCHours());
     const min = pad(slTime.getUTCMinutes());
 
-    return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}:00`;
 }
 
 // Vercel deployment සඳහා අවශ්‍ය වේ
