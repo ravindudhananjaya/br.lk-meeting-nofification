@@ -130,7 +130,6 @@ async function sendSMS(phone, message, scheduleTime = null) {
 // Formats time to "YYYY-MM-DD HH:MM" required by Text.lk
 // Formats time to "YYYY-MM-DD HH:MM" required by Text.lk (Sri Lanka Time Zone: UTC+5:30)
 function formatDateForTextLK(date) {
-    // Use Intl.DateTimeFormat to correctly convert to TimeZone (Format: YYYY-MM-DD HH:MM)
     const formatter = new Intl.DateTimeFormat('en-GB', {
         timeZone: 'Asia/Colombo',
         year: 'numeric',
@@ -138,20 +137,16 @@ function formatDateForTextLK(date) {
         day: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
+        second: '2-digit',
         hour12: false
     });
 
     const parts = formatter.formatToParts(date);
-    const getPart = (type) => parts.find(p => p.type === type).value;
+    const get = (t) => parts.find(p => p.type === t).value;
 
-    const yyyy = getPart('year');
-    const mm = getPart('month');
-    const dd = getPart('day');
-    const hh = getPart('hour');
-    const min = getPart('minute');
-
-    return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+    return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
 }
+
 
 // Required for Vercel deployment
 module.exports = app;
