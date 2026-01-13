@@ -121,18 +121,27 @@ async function sendSMS(phone, message, scheduleTime = null) {
 // වෙලාව Text.lk වලට අවශ්‍ය "YYYY-MM-DD HH:MM" format එකට සකසයි
 // වෙලාව Text.lk වලට අවශ්‍ය "YYYY-MM-DD HH:MM" format එකට සකසයි (Sri Lanka Time Zone: UTC+5:30)
 function formatDateForTextLK(date) {
-    // 1. UTC වෙලාවට පැය 5.5 (මිනිත්තු 330) එකතු කරන්න
-    const slTime = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+    // Intl.DateTimeFormat භාවිතා කර නිවැරදිව TimeZone එකට හරවන්න (Format: YYYY-MM-DD HH:MM)
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Colombo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
 
-    // 2. දැන් slTime එකේ UTC කොටස් ගත්තම හරියටම ලංකාවෙ වෙලාව ලැබෙනවා
-    const pad = (num) => num.toString().padStart(2, '0');
-    const yyyy = slTime.getUTCFullYear();
-    const mm = pad(slTime.getUTCMonth() + 1);
-    const dd = pad(slTime.getUTCDate());
-    const hh = pad(slTime.getUTCHours());
-    const min = pad(slTime.getUTCMinutes());
+    const parts = formatter.formatToParts(date);
+    const getPart = (type) => parts.find(p => p.type === type).value;
 
-    return `${yyyy}-${mm}-${dd} ${hh}:${min}:00`;
+    const yyyy = getPart('year');
+    const mm = getPart('month');
+    const dd = getPart('day');
+    const hh = getPart('hour');
+    const min = getPart('minute');
+
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
 }
 
 // Vercel deployment සඳහා අවශ්‍ය වේ
