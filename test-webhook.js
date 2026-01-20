@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 // CONFIGURATION
-const APP_URL = process.env.APP_URL || 'https://br-lk-meeting-notification.vercel.app'; // Fallback to what was seen in .env
+const APP_URL = process.env.APP_URL || 'https://br-lk-meeting-nofification.vercel.app'; // Fallback to deployed URL
 const TEST_PHONE = process.env.TEST_PHONE || '94777123456'; // User needs to set this or change it
 const ENDPOINT = `${APP_URL}/webhooks/cal`;
 
