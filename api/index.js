@@ -115,38 +115,42 @@ app.post('/webhooks/cal', async (req, res) => {
                 { type: 'text', text: meetingLink }
             ]);
 
-            // --- SMS 2: 1 Hour Before Reminder ---
-            const oneHourBefore = new Date(startTime.getTime() - (60 * 60 * 1000));
+            // --- 2. Schedule Reminders via QStash ---
             const now = new Date();
 
-            if (oneHourBefore > now) {
-                const delaySeconds = Math.floor((oneHourBefore.getTime() - now.getTime()) / 1000);
-                console.log(`Scheduling 1-hour reminder in ${delaySeconds} seconds`);
+            // Helper to schedule both SMS and WhatsApp
+            const scheduleReminder = async (targetDate, typeLabel) => {
+                if (targetDate > now) {
+                    const delaySeconds = Math.floor((targetDate.getTime() - now.getTime()) / 1000);
+                    console.log(`Scheduling ${typeLabel} reminder in ${delaySeconds} seconds`);
 
-                await scheduleWithQStash(
-                    cleanPhone,
-                    `Hello ${attendeeName},\nThis is a reminder that your meeting with br.lk starts in 1 hour.\n\nJoin Link: ${meetingLink}\nNeed to reschedule? ${rescheduleLink}\nOr contact us via WhatsApp: https://wa.me/94777895327`,
-                    delaySeconds
-                );
-            } else {
-                console.log('Skipping 1-hour reminder - time is in the past');
-            }
+                    const timeDiffLabel = typeLabel === '1-hour' ? '1 hour' : '10 mins'; // For text content
 
-            // --- SMS 3: 10 Minutes Before Reminder ---
+                    const userMessage = `Hello ${attendeeName},\nThis is a reminder that your meeting with br.lk starts in ${timeDiffLabel}.\n\nJoin Link: ${meetingLink}\nNeed to reschedule? ${rescheduleLink}\nOr contact us via WhatsApp: https://wa.me/94777895327`;
+
+                    // WhatsApp Template Components (Assumed: {{1}}=Name, {{2}}=TimeDiff, {{3}}=Link)
+                    const waComponents = [
+                        { type: 'text', text: attendeeName },
+                        { type: 'text', text: timeDiffLabel },
+                        { type: 'text', text: meetingLink }
+                    ];
+
+                    await scheduleWithQStash(
+                        cleanPhone,
+                        userMessage,
+                        { template: WHATSAPP_TEMPLATE_REMINDER, components: waComponents },
+                        delaySeconds
+                    );
+                } else {
+                    console.log(`Skipping ${typeLabel} reminder - time is in the past`);
+                }
+            };
+
+            const oneHourBefore = new Date(startTime.getTime() - (60 * 60 * 1000));
+            await scheduleReminder(oneHourBefore, '1-hour');
+
             const tenMinsBefore = new Date(startTime.getTime() - (10 * 60 * 1000));
-
-            if (tenMinsBefore > now) {
-                const delaySeconds = Math.floor((tenMinsBefore.getTime() - now.getTime()) / 1000);
-                console.log(`Scheduling 10-min reminder in ${delaySeconds} seconds`);
-
-                await scheduleWithQStash(
-                    cleanPhone,
-                    `Reminder: Your meeting with br.lk starts in 10 mins.\n\nClick to join: ${meetingLink}\nNeed to change? ${rescheduleLink}\nOr WhatsApp: https://wa.me/94777895327`,
-                    delaySeconds
-                );
-            } else {
-                console.log('Skipping 10-min reminder - time is in the past');
-            }
+            await scheduleReminder(tenMinsBefore, '10-min');
 
             return res.status(200).json({ status: 'success', message: 'All messages processed' });
 
