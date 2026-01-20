@@ -10,6 +10,12 @@ const SENDER_ID = process.env.SENDER_ID || 'TextLKDemo';
 const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
 const APP_URL = process.env.APP_URL; // e.g., https://your-project.vercel.app
 
+// WhatsApp Configuration
+const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
+const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const WHATSAPP_TEMPLATE_CONFIRMATION = process.env.WHATSAPP_TEMPLATE_CONFIRMATION || 'meeting_confirmation';
+const WHATSAPP_TEMPLATE_REMINDER = process.env.WHATSAPP_TEMPLATE_REMINDER || 'meeting_reminder';
+
 // --- HEALTH CHECK ENDPOINT ---
 app.get('/', (req, res) => {
     res.status(200).send('Webhook server is running. Send POST requests to /webhooks/cal');
@@ -19,21 +25,42 @@ app.get('/', (req, res) => {
 app.post('/api/send-reminder', async (req, res) => {
     // Basic security check (optional but recommended: verify QStash signature)
     // For now, checks if called internally or has data
-    const { phone, message } = req.body;
+    const { phone, message, whatsappParams } = req.body;
 
-    if (!phone || !message) {
-        return res.status(400).send('Missing phone or message');
+    if (!phone) {
+        return res.status(400).send('Missing phone number');
     }
 
     console.log(`[Reminder Endpoint] Triggered for ${phone}`);
+    const results = {};
 
-    try {
-        await sendSMS(phone, message);
-        res.status(200).send('Reminder sent successfully');
-    } catch (error) {
-        console.error('[Reminder Endpoint] Failed to send SMS:', error.message);
-        res.status(500).send('Failed to send SMS');
+    // 1. Send SMS (if message is provided)
+    if (message) {
+        try {
+            await sendSMS(phone, message);
+            results.sms = 'sent';
+        } catch (error) {
+            console.error('[Reminder Endpoint] Failed to send SMS:', error.message);
+            results.sms = 'failed';
+        }
     }
+
+    // 2. Send WhatsApp (if params provided)
+    if (whatsappParams) {
+        try {
+            // whatsappParams should contain { templateName, components }
+            // but we might just pass the raw data needed for the reminder template
+            // For simplicity in this QStash payload, let's expect the full params or construct them
+            // We expect whatsappParams to contain { template, components }
+            await sendWhatsApp(phone, whatsappParams.template, whatsappParams.components);
+            results.whatsapp = 'sent';
+        } catch (error) {
+            console.error('[Reminder Endpoint] Failed to send WhatsApp:', error.message);
+            results.whatsapp = 'failed';
+        }
+    }
+
+    res.status(200).json({ status: 'processed', results });
 });
 
 // --- MAIN WEBHOOK ENDPOINT ---
@@ -71,11 +98,22 @@ app.post('/webhooks/cal', async (req, res) => {
             console.log('Current Time (UTC):', new Date().toISOString());
             console.log('====================');
 
-            // --- SMS 1: Immediate Confirmation ---
+            const formattedTime = startTime.toLocaleString('en-GB', { timeZone: 'Asia/Colombo' });
+
+            // --- 1. Immediate Confirmation ---
+            // SMS
             await sendSMS(
                 cleanPhone,
-                `Hi ${attendeeName},\nYour appointment is successfully scheduled. Time: ${startTime.toLocaleString('en-GB', { timeZone: 'Asia/Colombo' })}.\n\nJoin here: ${meetingLink}\nNeed to change? Reschedule here: ${rescheduleLink}\nThank you for choosing br.lk. See you soon`
+                `Hi ${attendeeName},\nYour appointment is successfully scheduled. Time: ${formattedTime}.\n\nJoin here: ${meetingLink}\nNeed to change? Reschedule here: ${rescheduleLink}\nThank you for choosing br.lk. See you soon`
             );
+
+            // WhatsApp (Template: Confirmation)
+            // Assumed Template Vars: {{1}}=Name, {{2}}=Time, {{3}}=Link
+            await sendWhatsApp(cleanPhone, WHATSAPP_TEMPLATE_CONFIRMATION, [
+                { type: 'text', text: attendeeName },
+                { type: 'text', text: formattedTime },
+                { type: 'text', text: meetingLink }
+            ]);
 
             // --- SMS 2: 1 Hour Before Reminder ---
             const oneHourBefore = new Date(startTime.getTime() - (60 * 60 * 1000));
@@ -152,7 +190,55 @@ async function sendSMS(phone, message) {
     }
 }
 
-async function scheduleWithQStash(phone, message, delaySeconds) {
+async function sendWhatsApp(phone, templateName, components) {
+    if (!WHATSAPP_ACCESS_TOKEN || !WHATSAPP_PHONE_NUMBER_ID) {
+        console.log('[WhatsApp] Skipping. Configuration missing.');
+        return;
+    }
+
+    const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+
+    // Transform simple components list to Meta's format if needed
+    // Assuming simple list of {type: 'text', text: 'val'} passed in
+    const bodyParameters = components.map(c => ({
+        type: c.type,
+        text: c.text
+    }));
+
+    const payload = {
+        messaging_product: "whatsapp",
+        to: phone,
+        type: "template",
+        template: {
+            name: templateName,
+            language: { code: "en_US" }, // Defaulting to English
+            components: [
+                {
+                    type: "body",
+                    parameters: bodyParameters
+                }
+            ]
+        }
+    };
+
+    console.log(`[WhatsApp] Sending template '${templateName}' to ${phone}`);
+
+    try {
+        const response = await axios.post(url, payload, {
+            headers: {
+                'Authorization': `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        console.log('[WhatsApp] Success:', response.data);
+        return response;
+    } catch (error) {
+        console.error('[WhatsApp] Error:', error.response?.data || error.message);
+        // Log but don't throw
+    }
+}
+
+async function scheduleWithQStash(phone, smsMessage, whatsappParams, delaySeconds) {
     if (!QSTASH_TOKEN || !APP_URL) {
         console.warn('Skipping QStash scheduling: QSTASH_TOKEN or APP_URL not set');
         return;
@@ -160,10 +246,17 @@ async function scheduleWithQStash(phone, message, delaySeconds) {
 
     const url = `https://qstash.upstash.io/v2/publish/${APP_URL}/api/send-reminder`;
 
+    // Wrapper payload for our endpoint
+    const payload = {
+        phone,
+        message: smsMessage,
+        whatsappParams // { template, components }
+    };
+
     try {
         const response = await axios.post(
             url,
-            { phone, message },
+            payload,
             {
                 headers: {
                     'Authorization': `Bearer ${QSTASH_TOKEN}`,
@@ -175,7 +268,6 @@ async function scheduleWithQStash(phone, message, delaySeconds) {
         console.log(`[QStash] Scheduled SMS for ${phone} in ${delaySeconds}s. ID: ${response.data.messageId}`);
     } catch (error) {
         console.error('[QStash] Error:', error.response?.data || error.message);
-        // Don't throw here to avoid failing the whole webhook if scheduling fails
     }
 }
 
