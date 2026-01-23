@@ -109,11 +109,17 @@ app.post('/webhooks/cal', async (req, res) => {
 
             // WhatsApp (Template: Confirmation)
             // Assumed Template Vars: {{1}}=Name, {{2}}=Time, {{3}}=Link
-            await sendWhatsApp(cleanPhone, WHATSAPP_TEMPLATE_CONFIRMATION, [
-                { type: 'text', text: attendeeName },
-                { type: 'text', text: formattedTime },
-                { type: 'text', text: meetingLink }
-            ]);
+            try {
+                await sendWhatsApp(cleanPhone, WHATSAPP_TEMPLATE_CONFIRMATION, [
+                    { type: 'text', text: attendeeName },
+                    { type: 'text', text: formattedTime },
+                    { type: 'text', text: meetingLink }
+                ]);
+                console.log('[Webhook] ✅ WhatsApp confirmation sent successfully');
+            } catch (error) {
+                console.error('[Webhook] ❌ Failed to send WhatsApp confirmation:', error.message);
+                // Continue processing even if WhatsApp fails
+            }
 
             // --- 2. Schedule Reminders via QStash ---
             const now = new Date();
@@ -196,14 +202,18 @@ async function sendSMS(phone, message) {
 
 async function sendWhatsApp(phone, templateName, components) {
     if (!WHATSAPP_ACCESS_TOKEN || !WHATSAPP_PHONE_NUMBER_ID) {
-        console.log('[WhatsApp] Skipping. Configuration missing.');
-        return;
+        const errorMsg = '[WhatsApp] Configuration missing. Check WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
     }
 
-    const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    // Ensure phone number is in correct format (no + prefix for WhatsApp API)
+    const formattedPhone = phone.startsWith('+') ? phone.substring(1) : phone;
 
-    // Transform simple components list to Meta's format if needed
-    // Assuming simple list of {type: 'text', text: 'val'} passed in
+    // Use latest stable API version
+    const url = `https://graph.facebook.com/v22.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+
+    // Transform simple components list to Meta's format
     const bodyParameters = components.map(c => ({
         type: c.type,
         text: c.text
@@ -211,11 +221,11 @@ async function sendWhatsApp(phone, templateName, components) {
 
     const payload = {
         messaging_product: "whatsapp",
-        to: phone,
+        to: formattedPhone,
         type: "template",
         template: {
             name: templateName,
-            language: { code: "en_US" }, // Defaulting to English
+            language: { code: "en_US" },
             components: [
                 {
                     type: "body",
@@ -225,7 +235,8 @@ async function sendWhatsApp(phone, templateName, components) {
         }
     };
 
-    console.log(`[WhatsApp] Sending template '${templateName}' to ${phone}`);
+    console.log(`[WhatsApp] Sending template '${templateName}' to ${formattedPhone}`);
+    console.log('[WhatsApp] Payload:', JSON.stringify(payload, null, 2));
 
     try {
         const response = await axios.post(url, payload, {
@@ -234,11 +245,21 @@ async function sendWhatsApp(phone, templateName, components) {
                 'Content-Type': 'application/json'
             }
         });
-        console.log('[WhatsApp] Success:', response.data);
+        console.log('[WhatsApp] Success:', JSON.stringify(response.data, null, 2));
         return response;
     } catch (error) {
-        console.error('[WhatsApp] Error:', error.response?.data || error.message);
-        // Log but don't throw
+        // Enhanced error logging
+        console.error('[WhatsApp] ❌ ERROR DETAILS:');
+        console.error('  Status:', error.response?.status);
+        console.error('  Status Text:', error.response?.statusText);
+        console.error('  Error Data:', JSON.stringify(error.response?.data, null, 2));
+        console.error('  Error Message:', error.message);
+        console.error('  Template Name:', templateName);
+        console.error('  Phone Number:', formattedPhone);
+        console.error('  Components:', JSON.stringify(components, null, 2));
+
+        // Throw the error so it can be caught and handled upstream
+        throw new Error(`WhatsApp API Error: ${error.response?.data?.error?.message || error.message}`);
     }
 }
 
