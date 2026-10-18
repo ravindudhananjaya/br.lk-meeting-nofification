@@ -16,6 +16,19 @@ const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 const WHATSAPP_TEMPLATE_CONFIRMATION = process.env.WHATSAPP_TEMPLATE_CONFIRMATION || 'meeting_confirmation';
 const WHATSAPP_TEMPLATE_REMINDER = process.env.WHATSAPP_TEMPLATE_REMINDER || 'meeting_reminder';
 
+// Alexa (Voice Monkey) meeting announcements on the office Echo.
+// Each announcement uses one request from the Voice Monkey plan (free: 200/month,
+// shared with the dashboard's new-order alerts).
+const VOICE_MONKEY_TOKEN = process.env.VOICE_MONKEY_TOKEN;
+const VOICE_MONKEY_DEVICE = process.env.VOICE_MONKEY_DEVICE;
+// Minutes before the meeting, comma-separated, e.g. "30,10".
+const ALEXA_REMINDER_MINUTES = (process.env.ALEXA_REMINDER_MINUTES || '30,10')
+    .split(',')
+    .map((m) => Number(m.trim()))
+    .filter((m) => Number.isFinite(m) && m > 0);
+// Shared secret QStash forwards to /api/alexa-announce, so nobody else can make the Echo talk.
+const ALEXA_WEBHOOK_SECRET = process.env.ALEXA_WEBHOOK_SECRET;
+
 // --- HEALTH CHECK ENDPOINT ---
 app.get('/', (req, res) => {
     res.status(200).send('Webhook server is running. Send POST requests to /webhooks/cal');
@@ -63,6 +76,24 @@ app.post('/api/send-reminder', async (req, res) => {
     res.status(200).json({ status: 'processed', results });
 });
 
+// --- ALEXA ANNOUNCEMENT ENDPOINT (Called by QStash) ---
+app.post('/api/alexa-announce', async (req, res) => {
+    if (!ALEXA_WEBHOOK_SECRET || req.get('x-alexa-secret') !== ALEXA_WEBHOOK_SECRET) {
+        return res.status(401).send('Unauthorized');
+    }
+    const { speech } = req.body || {};
+    if (!speech) return res.status(400).send('Missing speech');
+
+    try {
+        await announceOnAlexa(speech);
+        res.status(200).json({ status: 'announced' });
+    } catch (error) {
+        console.error('[Alexa] Failed:', error.message);
+        // 500 lets QStash retry a transient Voice Monkey failure.
+        res.status(500).json({ status: 'failed', error: error.message });
+    }
+});
+
 // --- MAIN WEBHOOK ENDPOINT ---
 app.post('/webhooks/cal', async (req, res) => {
     const { triggerEvent, payload } = req.body;
@@ -76,6 +107,10 @@ app.post('/webhooks/cal', async (req, res) => {
 
             const startTime = new Date(payload.startTime);
             const attendeeName = payload.attendees[0].name;
+
+            // Alexa reminders for us — before the phone checks below, which
+            // skip international customers entirely.
+            await scheduleAlexaReminders(startTime, attendeeName);
 
             // Phone number processing
             let rawPhone = payload.attendees[0].phoneNumber || payload.responses?.phone || "";
@@ -293,6 +328,61 @@ async function scheduleWithQStash(phone, smsMessage, whatsappParams, delaySecond
         console.log(`[QStash] Scheduled SMS for ${phone} in ${delaySeconds}s. ID: ${response.data.messageId}`);
     } catch (error) {
         console.error('[QStash] Error:', error.response?.data || error.message);
+    }
+}
+
+async function announceOnAlexa(speech) {
+    if (!VOICE_MONKEY_TOKEN || !VOICE_MONKEY_DEVICE) {
+        throw new Error('VOICE_MONKEY_TOKEN or VOICE_MONKEY_DEVICE not set');
+    }
+    try {
+        await axios.post(
+            'https://api-v3.voicemonkey.io/announce',
+            { device: VOICE_MONKEY_DEVICE, speech: String(speech).slice(0, 400) },
+            {
+                headers: { Authorization: `Bearer ${VOICE_MONKEY_TOKEN}`, 'Content-Type': 'application/json' },
+                timeout: 8000,
+            }
+        );
+        console.log('[Alexa] Announced:', speech);
+    } catch (error) {
+        throw new Error(error.response?.data?.error || error.message);
+    }
+}
+
+async function scheduleAlexaReminders(startTime, attendeeName) {
+    if (!VOICE_MONKEY_TOKEN || !VOICE_MONKEY_DEVICE || !ALEXA_WEBHOOK_SECRET || !QSTASH_TOKEN || !APP_URL) {
+        console.warn('[Alexa] Skipping reminders: Voice Monkey, ALEXA_WEBHOOK_SECRET, QSTASH_TOKEN or APP_URL not set');
+        return;
+    }
+    const now = Date.now();
+    const time = startTime.toLocaleTimeString('en-US', { timeZone: 'Asia/Colombo', hour: 'numeric', minute: '2-digit' });
+
+    for (const minutes of ALEXA_REMINDER_MINUTES) {
+        const fireAt = startTime.getTime() - minutes * 60 * 1000;
+        if (fireAt <= now) {
+            console.log(`[Alexa] Skipping ${minutes}-min reminder - time is in the past`);
+            continue;
+        }
+        const speech = `Meeting reminder. You have a B R dot L K meeting with ${attendeeName || 'a customer'} in ${minutes} minutes, at ${time}.`;
+        try {
+            const response = await axios.post(
+                `https://qstash.upstash.io/v2/publish/${APP_URL}/api/alexa-announce`,
+                { speech },
+                {
+                    headers: {
+                        Authorization: `Bearer ${QSTASH_TOKEN}`,
+                        'Upstash-Delay': `${Math.floor((fireAt - now) / 1000)}s`,
+                        // QStash passes "Upstash-Forward-*" headers on to our endpoint.
+                        'Upstash-Forward-X-Alexa-Secret': ALEXA_WEBHOOK_SECRET,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+            console.log(`[Alexa] Scheduled ${minutes}-min reminder. ID: ${response.data.messageId}`);
+        } catch (error) {
+            console.error(`[Alexa] Failed to schedule ${minutes}-min reminder:`, error.response?.data || error.message);
+        }
     }
 }
 
